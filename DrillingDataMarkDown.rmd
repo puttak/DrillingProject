@@ -1,0 +1,641 @@
+---
+title: "Drilling Data Bit Failure Prediction"
+author: "Ala Qabaja"
+date: "July 5th, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Reading and Transformation
+
+Data was read from csv files and loaded into SQL server. Data was consumed directly from SQL server. 
+
+```{r , include = FALSE}
+library(RODBC); 
+library(ggplot2);
+library(data.table);
+library(googleVis);
+library(reshape2);
+library(dplyr);
+library(lubridate);
+library(Boruta);
+library(caret);
+library(mlbench);
+library(e1071);
+library(rattle);
+library(rpart);
+library(rpart.plot);
+library(randomForest);
+library(ROCR);
+library(glmnet);
+library(ROSE);
+library(corrplot);
+
+setwd("C:\\Development\\R Projects\\MachineLearningProjects\\DrillingProject")
+
+source("DrillingFileReader.R")
+source("RemoveUnwantedRows.R")
+source("NormalizeAccumCols.R")
+source("DrillingClassLabel.R")
+source("RemoveUnwantedCols.R")
+source("CalculateVarImport.R")
+source("ReturnConfusionMatrix.R")
+source("FacetWrapLineChart.R")
+
+
+```
+
+A quick look at the data and dimensionality
+In reading, all data rows with negative hole depth were excluded
+```{r }
+df_original_31862 = DrillingFileReader(wellName = "well_31862")
+dim(df_original_31862)
+
+df_original_31943 = DrillingFileReader(wellName = "well_31943")
+dim(df_original_31943)
+
+df_original_31944 = DrillingFileReader(wellName = "well_31944")
+dim(df_original_31944)
+
+df_original_31945 = DrillingFileReader(wellName = "well_31945")
+dim(df_original_31944)
+
+df_original_31946 = DrillingFileReader(wellName = "well_31946")
+dim(df_original_31946)
+
+df_original_31947 = DrillingFileReader(wellName = "well_31947")
+dim(df_original_31947)
+
+df_original_31948 = DrillingFileReader(wellName = "well_31948")
+dim(df_original_31948)
+
+df_original_32202 = DrillingFileReader(wellName = "well_32202")
+dim(df_original_32202)
+
+```
+
+After reading the data, we needed to get rid of constant columns. Example of a constant column
+```{r }
+
+options(warn = -1)
+constCols_31862 = DetectConstantCols(dataSource = df_original_31862)
+constCols_31862
+ggplot(data = df_original_31862, aes(x = DateTime , y = AirPressure)) + geom_line()
+
+constCols_31943 = DetectConstantCols(dataSource = df_original_31943)
+constCols_31944 = DetectConstantCols(dataSource = df_original_31944)
+constCols_31945 = DetectConstantCols(dataSource = df_original_31945)
+constCols_31946 = DetectConstantCols(dataSource = df_original_31946)
+constCols_31947 = DetectConstantCols(dataSource = df_original_31947)
+constCols_31948 = DetectConstantCols(dataSource = df_original_31948)
+constCols_32202 = DetectConstantCols(dataSource = df_original_32202)
+options(war = 0)
+
+```
+
+The list of all constant columns from all wells is
+```{r }
+## Constant Columns from different wells
+uniqueConstCols = unique(c(constCols_31862, constCols_31943, constCols_31944, constCols_31945, constCols_31946, constCols_31947, constCols_31948, constCols_32202))
+uniqueConstCols
+```
+
+```{r, include= FALSE}
+df_0_31862 = RemoveColsList(df_original_31862,uniqueConstCols)
+df_0_31943 = RemoveColsList(df_original_31943,uniqueConstCols)
+df_0_31944 = RemoveColsList(df_original_31944,uniqueConstCols)
+df_0_31945 = RemoveColsList(df_original_31945,uniqueConstCols)
+df_0_31946 = RemoveColsList(df_original_31946,uniqueConstCols)
+df_0_31947 = RemoveColsList(df_original_31947,uniqueConstCols)
+df_0_31948 = RemoveColsList(df_original_31948,uniqueConstCols)
+df_0_32202 = RemoveColsList(df_original_32202,uniqueConstCols)
+
+
+dfRemConstCols = data.frame(FeatureName = uniqueConstCols, Reason = "Constant Column - Zero Variance", WellName = "All Wells", Version = "Main")
+
+```
+Then we needed to get rid of columns with missing values. Example
+```{r}
+missCols_31862 = DetectColsWithMissingValues(df_0_31862, missValuesPercent= 5)
+missCols_31862
+missCols_31943 = DetectColsWithMissingValues(df_0_31943, missValuesPercent= 5)
+missCols_31943
+missCols_31944 = DetectColsWithMissingValues(df_0_31944, missValuesPercent= 5)
+missCols_31944
+missCols_31945 = DetectColsWithMissingValues(df_0_31945, missValuesPercent= 5)
+missCols_31945
+missCols_31946 = DetectColsWithMissingValues(df_0_31946, missValuesPercent= 5)
+missCols_31946
+missCols_31947 = DetectColsWithMissingValues(df_0_31947, missValuesPercent= 5)
+missCols_31947
+missCols_31948 = DetectColsWithMissingValues(df_0_31948, missValuesPercent= 5)
+missCols_31948
+## so many missing values. We should exclude this experiment for now
+missCols_32202 = DetectColsWithMissingValues(df_0_32202, missValuesPercent= 5)
+missCols_32202
+
+```
+
+The list of all columns more than 5% missing values are
+
+```{r}
+uniqueMissCols = unique(c(missCols_31862, missCols_31943, missCols_31944, missCols_31945, missCols_31946, missCols_31947, missCols_31948))
+## This list needs to be reviewed by Kurt and Kurt should indicate if we need to investigate any column
+uniqueMissCols
+```
+
+Remove these columns from all experiments
+```{r}
+df_1_31862 = RemoveColsList(df_0_31862, uniqueMissCols)
+df_1_31943 = RemoveColsList(df_0_31943, uniqueMissCols)
+df_1_31944 = RemoveColsList(df_0_31944, uniqueMissCols)
+df_1_31945 = RemoveColsList(df_0_31945, uniqueMissCols)
+df_1_31946 = RemoveColsList(df_0_31946, uniqueMissCols)
+df_1_31947 = RemoveColsList(df_0_31947, uniqueMissCols)
+df_1_31948 = RemoveColsList(df_0_31948, uniqueMissCols)
+df_1_32202 = RemoveColsList(df_0_32202, uniqueMissCols)
+
+
+dfRemMissCols = data.frame(FeatureName = uniqueMissCols, Reason = "Missing Columns - More than 5% of rows", WellName = "All Wells", Version = "Main")
+```
+
+
+Normalization of Accume Columns 
+What is an accum column
+```{r}
+## Plot of Hole Depth measurement accross time
+ggplot(data = df_1_31862, aes(x = DateTime, y = HoleDepth)) + geom_line()
+
+```
+
+```{r}
+accumColToNormalize = c("HoleDepth","AccumRotations","BitHours","BitPosition","BitTVD","CirculatingHrs","CutandSlip","GammaDepth","KellyDown","PipeLength","PipeLengthChange",
+                        "QLStartDepth","SoftSpeedStringLength","StringLength","StrksFill","TVD","QLStrokesToSurface","QLStksBtUp","HookLoad")
+
+MissConsCols = unique(c(uniqueMissCols, uniqueConstCols))
+accumColToNormalize = accumColToNormalize[!(accumColToNormalize %in% MissConsCols)]
+
+df_1_31862 = NormalizeAccumCols(df_1_31862, accumColToNormalize)
+df_1_31943 = NormalizeAccumCols(df_1_31943, accumColToNormalize)
+df_1_31944 = NormalizeAccumCols(df_1_31944, accumColToNormalize)
+df_1_31945 = NormalizeAccumCols(df_1_31945, accumColToNormalize)
+df_1_31946 = NormalizeAccumCols(df_1_31946, accumColToNormalize)
+df_1_31947 = NormalizeAccumCols(df_1_31947, accumColToNormalize)
+df_1_31948 = NormalizeAccumCols(df_1_31948, accumColToNormalize)
+df_1_32202 = NormalizeAccumCols(df_1_32202, accumColToNormalize)
+```
+
+
+
+```{r, include = FALSE}
+accumColToNormalize = accumColToNormalize[!(accumColToNormalize %in% c("HoleDepth"))]
+df_1_31862 = RemoveColsList(df_1_31862, accumColToNormalize)
+df_1_31943 = RemoveColsList(df_1_31943, accumColToNormalize)
+df_1_31944 = RemoveColsList(df_1_31944, accumColToNormalize)
+df_1_31945 = RemoveColsList(df_1_31945, accumColToNormalize)
+df_1_31946 = RemoveColsList(df_1_31946, accumColToNormalize)
+df_1_31947 = RemoveColsList(df_1_31947, accumColToNormalize)
+df_1_31948 = RemoveColsList(df_1_31948, accumColToNormalize)
+df_1_32202 = RemoveColsList(df_1_32202, accumColToNormalize)
+
+dfRemAccumtCols = data.frame(FeatureName = accumColToNormalize, Reason = "Accum Columns Replaced with Diff Columns", WellName = "All Wells", Version = "Main")
+
+```
+
+
+Remove all columns that were mentioned by Kurt as non-important
+```{r }
+unwantedColsKurt =  c("ADTargetWeight", "ADTargetBitWeight", "ADTargetDiffPress","ADTargetROP","ADTargetTorque","PitVolume5","PitVolume4","PitVolume3","PitVolume2","PitVolume1")
+unwantedColsKurt
+df_1_31862 = RemoveColsList(df_1_31862, unwantedColsKurt)
+df_1_31943 = RemoveColsList(df_1_31943, unwantedColsKurt)
+df_1_31944 = RemoveColsList(df_1_31944, unwantedColsKurt)
+df_1_31945 = RemoveColsList(df_1_31945, unwantedColsKurt)
+df_1_31946 = RemoveColsList(df_1_31946, unwantedColsKurt)
+df_1_31947 = RemoveColsList(df_1_31947, unwantedColsKurt)
+df_1_31948 = RemoveColsList(df_1_31948, unwantedColsKurt)
+df_1_32202 = RemoveColsList(df_1_32202, unwantedColsKurt)
+
+```
+
+```{r, include = FALSE}
+## Remove all 0 data frames
+rm(df_0_31862)
+rm(df_0_31943)
+rm(df_0_31944)
+rm(df_0_31945)
+rm(df_0_31946)
+rm(df_0_31947)
+rm(df_0_31948)
+rm(df_0_32202)
+```
+
+
+Then, data tables needed to be split based on their Hole Depth value. 
+Each Hole depth range represented a failure
+```{r }
+df_1_31862_exp1 = df_1_31862[df_1_31862$HoleDepth>= 2296 & df_1_31862$HoleDepth<= 4258, ]
+dim(df_1_31862_exp1)
+
+df_1_31943_exp1 = df_1_31943[df_1_31943$HoleDepth>= 458 & df_1_31943$HoleDepth<= 1626, ]
+dim(df_1_31943_exp1)
+
+df_1_31943_exp2 = df_1_31943[df_1_31943$HoleDepth>= 2095 & df_1_31943$HoleDepth<= 3828, ]
+dim(df_1_31943_exp2)
+
+df_1_31945_exp1 = df_1_31945[df_1_31945$HoleDepth>= 2278 & df_1_31945$HoleDepth<= 3311, ]
+dim(df_1_31945_exp1)
+
+df_1_31946_exp1 = df_1_31946[df_1_31946$HoleDepth>= 2153 & df_1_31946$HoleDepth<= 3767, ]
+dim(df_1_31946_exp1)
+
+df_1_32202_exp1 = df_1_32202[df_1_32202$HoleDepth>= 455 & df_1_32202$HoleDepth<=999, ]
+dim(df_1_32202_exp1)
+
+```
+
+Plot linear chart for each variable accross all wells
+```{r, include= FALSE}
+
+facetWrapData = rbind(cbind(melt(df_1_31862_exp1,id.vars = c("DateTime")),Depth = "Well_31862_exp1"), 
+                      cbind(melt(df_1_31943_exp1,id.vars = c("DateTime")),Depth = "Well_31943_exp1"), 
+                      cbind(melt(df_1_31943_exp2,id.vars = c("DateTime")),Depth = "Well_31943_exp2"), 
+                      cbind(melt(df_1_31945_exp1,id.vars = c("DateTime")),Depth = "Well_31945_exp1"), 
+                      cbind(melt(df_1_31946_exp1,id.vars = c("DateTime")),Depth = "Well_31946_exp1"),
+                      cbind(melt(df_1_32202_exp1,id.vars = c("DateTime")),Depth = "Well_32202_exp1")
+)
+
+myLinePlot = function(plotCol){
+
+  
+  p = FacetWrapLineChart(df = facetWrapData, variableName = plotCol)
+  p
+  
+}
+
+colNames = colnames(df_1_31862_exp1)
+facetColNames = unique(colNames[!(colNames %in% c("DateTime"))])
+
+dfm_ADBitWeight = facetWrapData[facetWrapData$variable %in% c("ADBitWeight"),]
+dfm_BHALength = facetWrapData[facetWrapData$variable %in% c("BHALength"),]
+
+
+```
+
+Example on a variable that was kept after Exploitation
+```{r}
+  title <- paste("Line Plots for ADBitWeight across time faceted well")
+  p = ggplot(data = dfm_ADBitWeight, aes_string(x = "DateTime", y = "value")) + geom_line()
+  p = p + geom_point()
+  p = p + facet_wrap(~ Depth , scales="free") 
+  p = p + ggtitle(title)
+  p
+```
+
+Example on a variable that was removed after Exploitation
+```{r}
+  title <- paste("Line Plots for BHALength across time faceted by Bits")
+  p = ggplot(data = dfm_BHALength, aes_string(x = "DateTime", y = "value")) + geom_line()
+  p = p + geom_point()
+  p = p + facet_wrap(~ Depth , scales="free") 
+  p = p + ggtitle(title)
+  p
+```
+
+Filtering out Rows Based on Exploitation
+```{r, include= FALSE}
+df_1_31862_exp1 = df_1_31862_exp1[df_1_31862_exp1$DateTime>= "2017-01-04 00:00:00",]
+df_1_31943_exp1 = df_1_31943_exp1[df_1_31943_exp1$DateTime>= "2017-01-10 08:00:00", ]
+df_1_31943_exp2 = df_1_31943_exp2[df_1_31943_exp2$DateTime>= "2017-01-13 12:00:00" & df_1_31943_exp2$DateTime< "2017-01-16 00:00:00", ]
+df_1_31945_exp1 = df_1_31945_exp1[df_1_31945_exp1$DateTime>= "2017-01-31 07:00:00", ]
+df_1_31946_exp1 = df_1_31946_exp1[df_1_31946_exp1$DateTime>= "2017-02-09 00:00:00" & df_1_31946_exp1$ADBitWeight> -500, ]
+df_1_32202_exp1 = df_1_32202_exp1[df_1_32202_exp1$DateTime>= "2017-02-01 00:00:00", ]
+
+
+```
+
+Filtering out Columns based on Exploitation
+```{r}
+unwantedColsExploit = c("AccumTripOut" , "BHALength", "BitSize", "BitStatus", "DegasserTankS10DAQ", "HoleDepth", "Last24HrWear", "PumpSPM2","QLTimeToSurface","RigActivityCode", "SoftSpeedActive", "SoftSpeedEffectivePipeOuterDiameter","SoftSpeedPGain",        
+                        "SoftSpeedStickSlipAnalyzerTime", "SoftSpeedStickSlipRawSeverity", "SoftSpeedTally1BHAID" ,"SoftSpeedTally1BHAlength" ,"SoftSpeedTally1BHAOD" ,"SoftSpeedTally2ID","SoftSpeedTally2length",          
+                        "SoftSpeedTally2OD" ,"SoftSpeedTally3ID" ,"SoftSpeedTally3length","SoftSpeedTally3OD" ,"SoftSpeedTally4ID" , "SoftSpeedTally4length","SoftSpeedTally4OD"   , "SoftSpeedTDSHeartbeat" , "SoftSpeedTITime","StrksTotal"  , "TotalTripVolume", "TriggerHKLDStatus","TripTank","TripTankGL" , "WPDABitHHP" ,"WPDAStatus",
+                        "PumpSPM1", "AccumRotationsDiff","BitHoursDiff","BitPositionDiff","BitTVDDiff","CoManGL","CutandSlipDiff",
+                        "DogLegSeverity","Flock1","Flock2","Flock3","GainLoss","GainLossSpare","KellyDownDiff","LstElemLen",
+                        "LstJntTime","MudVolume","PillTank","PipeLengthChangeDiff","PipeLengthDiff","PTCorrection","QLStartDepthDiff",
+                        "SlipStatus","SlipSwitch","SoftSpeedKpGain","SoftSpeedStringLengthDiff","StringLengthDiff",
+                        "StrksFillDiff","TVDDiff")
+
+
+unwantedColsExploit
+df_1_31862_exp1 = RemoveColsList(df_1_31862_exp1,unwantedColsExploit)
+df_1_31943_exp1 = RemoveColsList(df_1_31943_exp1,unwantedColsExploit)
+df_1_31943_exp2 = RemoveColsList(df_1_31943_exp2,unwantedColsExploit)
+df_1_31945_exp1 = RemoveColsList(df_1_31945_exp1,unwantedColsExploit)
+df_1_31946_exp1 = RemoveColsList(df_1_31946_exp1,unwantedColsExploit)
+df_1_32202_exp1 = RemoveColsList(df_1_32202_exp1,unwantedColsExploit)
+```
+
+Plot again to make sure everything looks better now
+```{r, include = FALSE}
+facetWrapData2 = rbind(cbind(melt(df_1_31862_exp1,id.vars = c("DateTime")),Depth = "Well_31862_exp1"), 
+                       cbind(melt(df_1_31943_exp1,id.vars = c("DateTime")),Depth = "Well_31943_exp1"), 
+                       cbind(melt(df_1_31943_exp2,id.vars = c("DateTime")),Depth = "Well_31943_exp2"), 
+                       cbind(melt(df_1_31945_exp1,id.vars = c("DateTime")),Depth = "Well_31945_exp1"), 
+                       cbind(melt(df_1_31946_exp1,id.vars = c("DateTime")),Depth = "Well_31946_exp1"),
+                       cbind(melt(df_1_32202_exp1,id.vars = c("DateTime")),Depth = "Well_32202_exp1"))
+
+myLinePlot = function(plotCol){
+
+  
+  p = FacetWrapLineChart(df = facetWrapData2, variableName = plotCol)
+  p
+  
+}
+
+dfm_ADBitWeight = facetWrapData2[facetWrapData2$variable %in% c("ADBitWeight"),]
+dfm_BHALength = facetWrapData2[facetWrapData2$variable %in% c("BHALength"),]
+
+
+```
+
+Example on a variable that was kept after Exploitation
+```{r}
+  title <- paste("Line Plots for ADBitWeight across time faceted well")
+  p = ggplot(data = dfm_ADBitWeight, aes_string(x = "DateTime", y = "value")) + geom_line()
+  p = p + geom_point()
+  p = p + facet_wrap(~ Depth , scales="free") 
+  p = p + ggtitle(title)
+  p
+```
+
+Then, there was class labelling. Last two hours were skipped and the event was considered to last for three hours
+
+```{r}
+## Class labelling
+## Need to use time to do the class labelling 
+## Class labelling
+df_1_31862_exp1 = DrillingClassLabel(skipHours = 2, eventHours = 3, dataSource = df_1_31862_exp1)
+df_1_31943_exp1 = DrillingClassLabel(skipHours = 2, eventHours = 3, dataSource = df_1_31943_exp1)
+df_1_31943_exp2 = DrillingClassLabel(skipHours = 2, eventHours = 3, dataSource = df_1_31943_exp2)
+df_1_31945_exp1 = DrillingClassLabel(skipHours = 2, eventHours = 3, dataSource = df_1_31945_exp1)
+df_1_31946_exp1 = DrillingClassLabel(skipHours = 2, eventHours = 3, dataSource = df_1_31946_exp1)
+df_1_32202_exp1 = DrillingClassLabel(skipHours = 2, eventHours = 3, dataSource = df_1_32202_exp1)
+
+```
+
+Explore if there is any strong correlation between different variables
+
+```{r}
+cor_31862_exp1 = cor(df_1_31862_exp1[,c(2:ncol(df_1_31862_exp1))])
+corrplot(cor_31862_exp1, tl.cex = 0.7, method = "pie", type = "lower", bg = "white", diag = FALSE, tl.col = "blue", cl.ratio = 0.1,  order ="hclust" , title = "Correlation Matrix for Well_31862")
+
+cor_31943_exp1 = cor(df_1_31943_exp1[,c(2:ncol(df_1_31943_exp1))])
+corrplot(cor_31943_exp1, tl.cex = 0.7, method = "pie", type = "lower", bg = "white", diag = FALSE, tl.col = "blue", cl.ratio = 0.1,  order ="hclust", title = "Correlation Matrix for Well_31943_exp1" )
+
+df_1_31862_exp1_melt = melt(df_1_31862_exp1, id.vars = "DateTime")
+df_1_31862_LinearCorr = df_1_31862_exp1_melt[df_1_31862_exp1_melt$variable %in% c("PumpPressure", "DiffPress"),]
+ggplot(data = df_1_31862_LinearCorr, aes(x = DateTime, y  = value)) + geom_line(aes(colour = variable))
+```
+
+Silently remove data time 
+```{r, include = FALSE}
+df_1_31862_exp1 = df_1_31862_exp1[,c(2:ncol(df_1_31862_exp1))]
+df_1_31943_exp1 = df_1_31943_exp1[,c(2:ncol(df_1_31943_exp1))]
+df_1_31943_exp2 = df_1_31943_exp2[,c(2:ncol(df_1_31943_exp2))]
+df_1_31945_exp1 = df_1_31945_exp1[,c(2:ncol(df_1_31945_exp1))]
+df_1_31946_exp1 = df_1_31946_exp1[,c(2:ncol(df_1_31946_exp1))]
+df_1_32202_exp1 = df_1_32202_exp1[,c(2:ncol(df_1_32202_exp1))]
+```
+
+
+Load importance data frame
+```{r}
+load("TransformationSummaryFiles.RData") 
+dfImp = df_Importance
+aggImp = aggregate(dfImp[,c("VariableImportance")], by = list(dfImp$VariableName), "sum")
+aggImp[order(aggImp$x, decreasing = TRUE),]
+
+```
+
+
+
+Compile results to compare the accuracy of different algorithms
+
+Results for well_31862
+```{r}
+load("df_1_31862_exp1_models.rda")
+well_31862_results <- resamples(list(glmOriginal = listOfModels[["glmOriginal"]],
+                            glmUnder = listOfModels[["glmUnder"]],
+                            glmOver = listOfModels[["glmOver"]],
+               
+                            ldaOriginal=listOfModels[["ldaOriginal"]],
+                            ldaUnder = listOfModels[["ldaUnder"]],
+                            ldaOver = listOfModels[["ldaOver"]],
+                            
+                           glmnetOriginal=listOfModels[["glmnetOriginal"]],
+                            glmnetUnder = listOfModels[["glmnetUnder"]],
+                            glmnetOver = listOfModels[["glmnetOver"]],
+                      
+                            knnOriginal=listOfModels[["knnOriginal"]],
+                            knnUnder = listOfModels[["knnUnder"]],
+                            
+                            rpartOriginal=listOfModels[["rpartOriginal"]],
+                            rpartUnder= listOfModels[["rpartUnder"]], 
+                            rpartOver = listOfModels[["rpartOver"]],
+                       
+                            svmOriginal=listOfModels[["svmOriginal"]],
+                            svmUnder = listOfModels[["svmUnder"]],
+                            svmOver = listOfModels[["svmOver"]],
+                            nbOriginal =  listOfModels[["nbOriginal"]],
+                           nbUnder  = listOfModels[["nbUnder"]],
+                           nbOver = listOfModels[["nbOver"]]
+                        
+                            ))
+scales = list(x = list(relation = "free"), y = list(relation = "free"))
+bwplot(well_31862_results, scales = scales)
+## remove all models
+rm(listOfModels)
+
+```
+
+
+Results for well_31943
+```{r}
+load("df_1_31943_exp1_models.rda")
+well_31943_results <- resamples(list(glmOriginal = listOfModels[["glmOriginal"]],
+                            glmUnder = listOfModels[["glmUnder"]],
+                            glmOver = listOfModels[["glmOver"]],
+               
+                            ldaOriginal=listOfModels[["ldaOriginal"]],
+                            ldaUnder = listOfModels[["ldaUnder"]],
+                            ldaOver = listOfModels[["ldaOver"]],
+                            
+                           glmnetOriginal=listOfModels[["glmnetOriginal"]],
+                            glmnetUnder = listOfModels[["glmnetUnder"]],
+                            glmnetOver = listOfModels[["glmnetOver"]],
+                      
+                            knnOriginal=listOfModels[["knnOriginal"]],
+                            knnUnder = listOfModels[["knnUnder"]],
+                            
+                            rpartOriginal=listOfModels[["rpartOriginal"]],
+                            rpartUnder= listOfModels[["rpartUnder"]], 
+                            rpartOver = listOfModels[["rpartOver"]],
+                       
+                            svmOriginal=listOfModels[["svmOriginal"]],
+                            svmUnder = listOfModels[["svmUnder"]],
+                            svmOver = listOfModels[["svmOver"]],
+                            nbOriginal =  listOfModels[["nbOriginal"]],
+                           nbUnder  = listOfModels[["nbUnder"]],
+                           nbOver = listOfModels[["nbOver"]]
+                        
+                            ))
+scales = list(x = list(relation = "free"), y = list(relation = "free"))
+bwplot(well_31943_results, scales = scales)
+## remove all models
+rm(listOfModels)
+
+```
+
+Results for well_31943_exp2
+```{r}
+load("df_1_31943_exp2_models.rda")
+well_31943_exp2_results <- resamples(list(glmOriginal = listOfModels[["glmOriginal"]],
+                            glmUnder = listOfModels[["glmUnder"]],
+                            glmOver = listOfModels[["glmOver"]],
+               
+                            ldaOriginal=listOfModels[["ldaOriginal"]],
+                            ldaUnder = listOfModels[["ldaUnder"]],
+                            ldaOver = listOfModels[["ldaOver"]],
+                            
+                           glmnetOriginal=listOfModels[["glmnetOriginal"]],
+                            glmnetUnder = listOfModels[["glmnetUnder"]],
+                            glmnetOver = listOfModels[["glmnetOver"]],
+                      
+                            knnOriginal=listOfModels[["knnOriginal"]],
+                            knnUnder = listOfModels[["knnUnder"]],
+                            
+                            rpartOriginal=listOfModels[["rpartOriginal"]],
+                            rpartUnder= listOfModels[["rpartUnder"]], 
+                            rpartOver = listOfModels[["rpartOver"]],
+                       
+                            svmOriginal=listOfModels[["svmOriginal"]],
+                            svmUnder = listOfModels[["svmUnder"]],
+                            svmOver = listOfModels[["svmOver"]],
+                            nbOriginal =  listOfModels[["nbOriginal"]],
+                           nbUnder  = listOfModels[["nbUnder"]],
+                           nbOver = listOfModels[["nbOver"]]
+                        
+                            ))
+scales = list(x = list(relation = "free"), y = list(relation = "free"))
+bwplot(well_31943_exp2_results, scales = scales)
+## remove all models
+rm(listOfModels)
+```
+
+Results for well_31945_exp1
+```{r}
+load("df_1_31945_exp1_models.rda")
+well_31945_results <- resamples(list(glmOriginal = listOfModels[["glmOriginal"]],
+                            glmUnder = listOfModels[["glmUnder"]],
+                            glmOver = listOfModels[["glmOver"]],
+               
+                            ldaOriginal=listOfModels[["ldaOriginal"]],
+                            ldaUnder = listOfModels[["ldaUnder"]],
+                            ldaOver = listOfModels[["ldaOver"]],
+                            
+                           glmnetOriginal=listOfModels[["glmnetOriginal"]],
+                            glmnetUnder = listOfModels[["glmnetUnder"]],
+                            glmnetOver = listOfModels[["glmnetOver"]],
+                      
+                            knnOriginal=listOfModels[["knnOriginal"]],
+                            knnUnder = listOfModels[["knnUnder"]],
+                            
+                            rpartOriginal=listOfModels[["rpartOriginal"]],
+                            rpartUnder= listOfModels[["rpartUnder"]], 
+                            rpartOver = listOfModels[["rpartOver"]],
+                       
+                            svmOriginal=listOfModels[["svmOriginal"]],
+                            svmUnder = listOfModels[["svmUnder"]],
+                            svmOver = listOfModels[["svmOver"]],
+                            nbOriginal =  listOfModels[["nbOriginal"]],
+                           nbUnder  = listOfModels[["nbUnder"]],
+                           nbOver = listOfModels[["nbOver"]]
+                        
+                            ))
+scales = list(x = list(relation = "free"), y = list(relation = "free"))
+bwplot(well_31945_results, scales = scales)
+## remove all models
+rm(listOfModels)
+
+```
+
+Results for well_31946_exp1
+```{r}
+load("df_1_31946_exp1_models.rda")
+well_31946_results <- resamples(list(glmOriginal = listOfModels[["glmOriginal"]],
+                            glmUnder = listOfModels[["glmUnder"]],
+                            glmOver = listOfModels[["glmOver"]],
+               
+                            ldaOriginal=listOfModels[["ldaOriginal"]],
+                            ldaUnder = listOfModels[["ldaUnder"]],
+                            ldaOver = listOfModels[["ldaOver"]],
+                            
+                            knnOriginal=listOfModels[["knnOriginal"]],
+                            knnUnder = listOfModels[["knnUnder"]],
+                            
+                            rpartOriginal=listOfModels[["rpartOriginal"]],
+                            rpartUnder= listOfModels[["rpartUnder"]], 
+                            rpartOver = listOfModels[["rpartOver"]],
+                       
+                            svmOriginal=listOfModels[["svmOriginal"]],
+                            svmUnder = listOfModels[["svmUnder"]],
+                            svmOver = listOfModels[["svmOver"]],
+                            nbOriginal =  listOfModels[["nbOriginal"]],
+                           nbUnder  = listOfModels[["nbUnder"]],
+                           nbOver = listOfModels[["nbOver"]]
+                        
+                            ))
+scales = list(x = list(relation = "free"), y = list(relation = "free"))
+bwplot(well_31946_results, scales = scales)
+## remove all models
+rm(listOfModels)
+
+```
+
+Results for well_32202_exp1
+```{r}
+load("df_1_32202_exp1_models.rda")
+well_32202_results <- resamples(list(glmOriginal = listOfModels[["glmOriginal"]],
+                            glmUnder = listOfModels[["glmUnder"]],
+                            glmOver = listOfModels[["glmOver"]],
+               
+                            ldaOriginal=listOfModels[["ldaOriginal"]],
+                            ldaUnder = listOfModels[["ldaUnder"]],
+                            ldaOver = listOfModels[["ldaOver"]],
+                            
+                            knnOriginal=listOfModels[["knnOriginal"]],
+                            knnUnder = listOfModels[["knnUnder"]],
+                            
+                            rpartOriginal=listOfModels[["rpartOriginal"]],
+                            rpartUnder= listOfModels[["rpartUnder"]], 
+                            rpartOver = listOfModels[["rpartOver"]],
+                       
+                            svmOriginal=listOfModels[["svmOriginal"]],
+                            svmUnder = listOfModels[["svmUnder"]],
+                            svmOver = listOfModels[["svmOver"]],
+                            nbOriginal =  listOfModels[["nbOriginal"]],
+                           nbUnder  = listOfModels[["nbUnder"]],
+                           nbOver = listOfModels[["nbOver"]]
+                        
+                            ))
+scales = list(x = list(relation = "free"), y = list(relation = "free"))
+bwplot(well_32202_results, scales = scales)
+## remove all models
+rm(listOfModels)
+
+```
+
+

@@ -19,13 +19,13 @@ RemoveColsList = function(dataSource, unwantedCols)
   
   if(!(all( unwantedCols %in% names(dataSource))))
   {
-     warning("Not all columns listed exists in the data frame")
-     notExistCols = unwantedCols[!(unwantedCols %in% names(dataSource))]
-     for(i in 1:length(notExistCols))
-     {
-       warningMsg = paste0("Column ", notExistCols[i], " doesn't exist in the input dataframe")
-       warning(warningMsg)
-     }
+    warning("Not all columns listed exists in the data frame")
+    notExistCols = unwantedCols[!(unwantedCols %in% names(dataSource))]
+    for(i in 1:length(notExistCols))
+    {
+      warningMsg = paste0("Column ", notExistCols[i], " doesn't exist in the input dataframe")
+      warning(warningMsg)
+    }
     
   }
   dataSource = dataSource[,-which(names(dataSource) %in% unwantedCols)]
@@ -39,9 +39,10 @@ RemoveColsList = function(dataSource, unwantedCols)
 DetectCorrCols = function(dataSource, mycutoff)
 {
   
-  
+  set.seed(1234)
   dsCorr = cor(dataSource)
-  dsHighCorr = findCorrelation(dsCorr, cutoff = mycutoff, names = TRUE)
+  set.seed(1234)
+  dsHighCorr = findCorrelation(dsCorr, cutoff = mycutoff, names = TRUE, exact = TRUE)
   dsHighCorr
   
 }

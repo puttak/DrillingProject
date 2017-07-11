@@ -7,3 +7,13 @@ RemoveRowsWithMissingValues = function(dataSource)
   
   dataSource
 }
+
+
+RemoveInActivePeriod = function(dataSource)
+{
+  
+  dataSource = mutate(dataSource, DepthDifference = abs(HoleDepth - BitPosition))
+  dataSource = filter(dataSource, DepthDifference> 0.1)
+  dataSource
+  
+}

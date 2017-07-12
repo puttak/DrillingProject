@@ -201,7 +201,7 @@ df_31943_exp1 = df_31943_exp1[df_31943_exp1$DateTime>= "2017-01-10 08:00:00", ]
 df_31943_exp2 = df_31943_exp2[df_31943_exp2$DateTime>= "2017-01-13 12:00:00" & df_31943_exp2$DateTime< "2017-01-16 00:00:00", ]
 df_31945_exp1 = df_31945_exp1[df_31945_exp1$DateTime>= "2017-01-31 07:00:00", ]
 df_31946_exp1 = df_31946_exp1[df_31946_exp1$DateTime>= "2017-02-09 00:00:00" & df_31946_exp1$ADBitWeight> -500, ]
-df_32202_exp1 = df_32202_exp1[df_32202_exp1$DateTime>= "2017-02-01 00:00:00", ]
+df_32202_exp1 = df_32202_exp1[df_32202_exp1$DateTime>= "2017-02-26 02:00:00", ]
 
 ## Clean unwanted Columns based on feedback and those that are not needed anymore
 unwantedColsExploit = c("AccumTripOut" , "BHALength", "BitSize", "BitStatus", "DegasserTankS10DAQ", "HoleDepth", "Last24HrWear", "PumpSPM2","QLTimeToSurface","RigActivityCode", "SoftSpeedActive", "SoftSpeedEffectivePipeOuterDiameter","SoftSpeedPGain",        
@@ -315,6 +315,34 @@ df_31945_exp1 = df_31945_exp1[,c(2:ncol(df_31945_exp1))]
 df_31946_exp1 = df_31946_exp1[,c(2:ncol(df_31946_exp1))]
 df_32202_exp1 = df_32202_exp1[,c(2:ncol(df_32202_exp1))]
 
+## Second round to remove constant columns
+## Remove constant columns
+options(warn = -1)
+constCols_31862_exp1 = DetectConstantCols(dataSource = df_31862_exp1)
+constCols_31943_exp1 = DetectConstantCols(dataSource = df_31943_exp1)
+constCols_31943_exp2 = DetectConstantCols(dataSource = df_31943_exp2)
+constCols_31945_exp1 = DetectConstantCols(dataSource = df_31945_exp1)
+constCols_31946_exp1 = DetectConstantCols(dataSource = df_31946_exp1)
+constCols_32202_exp1 = DetectConstantCols(dataSource = df_32202_exp1)
+options(war = 0)
+
+## Constant Columns from different wells
+uniqueConstCols2 = unique(c(constCols_31862_exp1, constCols_31943_exp1,constCols_31943_exp2,
+                           constCols_31945_exp1, constCols_31946_exp1, constCols_32202_exp1))
+
+## Cleanup data frames
+df_31862_exp1 = RemoveColsList(df_31862_exp1,uniqueConstCols2)
+df_31943_exp1 = RemoveColsList(df_31943_exp1,uniqueConstCols2)
+df_31943_exp2 = RemoveColsList(df_31943_exp2,uniqueConstCols2)
+df_31945_exp1 = RemoveColsList(df_31945_exp1,uniqueConstCols2)
+df_31946_exp1 = RemoveColsList(df_31946_exp1,uniqueConstCols2)
+df_32202_exp1 = RemoveColsList(df_32202_exp1,uniqueConstCols2)
+
+dfRemConstCols2 = data.frame(FeatureName = uniqueConstCols2, Reason = "Constant Column - Zero Variance - Round 2", WellName = "All Wells", Version = "Main")
+
+
+
+
 
 ## find correlated columns
 corrCols_31862_exp1 = DetectCorrCols(dataSource = df_31862_exp1, mycutoff = 0.97)
@@ -324,8 +352,17 @@ corrCols_31945_exp1 = DetectCorrCols(dataSource = df_31945_exp1, mycutoff = 0.97
 corrCols_31946_exp1 = DetectCorrCols(dataSource = df_31946_exp1, mycutoff = 0.97)
 corrCols_32202_exp1 = DetectCorrCols(dataSource = df_32202_exp1, mycutoff = 0.97)
 
+corrColsCommon = intersect(intersect(intersect(intersect(intersect(corrCols_31862_exp1,corrCols_31943_exp2),corrCols_31945_exp1),corrCols_31946_exp1),corrCols_31943_exp1),corrCols_32202_exp1)
 
 
+df_31862_exp1 = RemoveColsList(df_31862_exp1,corrColsCommon)
+df_31943_exp1 = RemoveColsList(df_31943_exp1,corrColsCommon)
+df_31943_exp2 = RemoveColsList(df_31943_exp2,corrColsCommon)
+df_31945_exp1 = RemoveColsList(df_31945_exp1,corrColsCommon)
+df_31946_exp1 = RemoveColsList(df_31946_exp1,corrColsCommon)
+df_32202_exp1 = RemoveColsList(df_32202_exp1,corrColsCommon)
+
+dfRemCorrCols = data.frame(FeatureName = corrColsCommon, Reason = "Correlated Columns more than 0.97", WellName = "All Wells", Version = "Main")
 
 
 ## find Importance data frame
@@ -352,28 +389,27 @@ df_31946_exp1_ImportVars = FindImportantVariables(importanceSource = df_31946_ex
 df_31946_exp1 = KeepImportantVariables(dataSource = df_31946_exp1, df_31946_exp1_ImportVars)
 
 
+df_32202_exp1_Import = CalculateVarImport(dataSource = df_32202_exp1)
+df_32202_exp1_ImportVars = FindImportantVariables(importanceSource = df_32202_exp1_Import, neededVariables = 25)
+df_32202_exp1 = KeepImportantVariables(dataSource = df_32202_exp1, df_32202_exp1_ImportVars)
+
 
 df_Importance = rbind(cbind(df_31862_exp1_Import, WellName = "well_31862"), 
                       cbind(df_31943_exp1_Import, WellName = "well_31943_exp1"),
                       cbind(df_31943_exp2_Import, WellName = "well_31943_exp2"),
                       cbind(df_31945_exp1_Import, WellName = "well_31945"),
-                      cbind(df_31946_exp1_Import, WellName = "well_31946")
+                      cbind(df_31946_exp1_Import, WellName = "well_31946"),
+                      cbind(df_32202_exp1_Import, WellName = "well_32202")
                      )
 
-df_Removed = rbind(dfRemAccumtCols, dfRemConstCols, dfRemExploitCols, dfRemMissCols)
+df_Removed = rbind(dfRemAccumtCols, dfRemConstCols, dfRemExploitCols, dfRemMissCols,dfRemConstCols2,dfRemCorrCols)
 
 
-## Remove all highly correlated columns
-df_31862_exp1 = RemoveColsList(df_31862_exp1,df_31862_exp1_CorrCols)
-df_31943_exp1 = RemoveColsList(df_31943_exp1,df_31943_exp1_CorrCols)
-df_31943_exp2 = RemoveColsList(df_31943_exp2,df_31943_exp2_CorrCols)
-df_31945_exp1 = RemoveColsList(df_31945_exp1,df_31945_exp1_CorrCols)
-df_31946_exp1 = RemoveColsList(df_31946_exp1,df_31946_exp1_CorrCols)
 
 
 ## Write back needed objects
 
 save(df_Importance, df_Removed, file = "TransformationSummaryFiles_V2.RData")
-save(df_31862_exp1, df_31943_exp1, df_31943_exp2, df_31945_exp1, df_31946_exp1, file="DrillingDataLastVersion_V2.RData")
+save(df_31862_exp1, df_31943_exp1, df_31943_exp2, df_31945_exp1, df_31946_exp1, df_32202_exp1, file="DrillingDataLastVersion_V2.RData")
 
 
